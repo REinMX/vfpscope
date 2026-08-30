@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from vfpscope.core.parse.native import VfpParseError, parse_vfp_file
+from vfpscope.core.parse.native import parse_vfp_file
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

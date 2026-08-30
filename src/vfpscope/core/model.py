@@ -130,7 +130,7 @@ class VfpAxis(BaseModel):
     unit: str = ""
 
     @model_validator(mode="after")
-    def _validate(self) -> "VfpAxis":
+    def _validate(self) -> VfpAxis:
         v = self.values
         if not isinstance(v, np.ndarray) or v.ndim != 1 or v.size == 0:
             raise ValueError(f"axis {self.name}: values must be a non-empty 1-D array")
@@ -175,7 +175,7 @@ class VfpTable(BaseModel):
     consumers: Consumers = Field(default_factory=Consumers)
 
     @model_validator(mode="after")
-    def _validate(self) -> "VfpTable":
+    def _validate(self) -> VfpTable:
         if set(self.axes) != set(AXIS_ORDER):
             raise ValueError(f"table {self.number}: axes must be exactly {AXIS_ORDER}")
         shape = tuple(len(self.axes[a].values) for a in AXIS_ORDER)

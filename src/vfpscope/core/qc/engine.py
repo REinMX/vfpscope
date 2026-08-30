@@ -2,17 +2,35 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ..model import Finding, VfpTable
-from .checks import QCContext, check_absurd_bhp, check_alq_axis_blank_type
-from .checks import check_alq_length1_with_gaslift, check_axes_monotonic
-from .checks import check_bhp_below_thp, check_crossing_thp_curves, check_datum_mismatch
-from .checks import check_dead_table, check_duplicate_tables, check_flat_gradient
-from .checks import check_flo_phase_mismatch, check_header_enums, check_indices_in_range
-from .checks import check_non_finite, check_record_count, check_record_width
-from .checks import check_role_conflict, check_thp_monotonic, check_units_mismatch
-from .checks import check_unstable_branch
+from .checks import (
+    QCContext,
+    check_absurd_bhp,
+    check_alq_axis_blank_type,
+    check_alq_length1_with_gaslift,
+    check_axes_monotonic,
+    check_bhp_below_thp,
+    check_clamp_fraction,
+    check_crossing_thp_curves,
+    check_datum_mismatch,
+    check_dead_table,
+    check_duplicate_tables,
+    check_flat_gradient,
+    check_flo_phase_mismatch,
+    check_header_enums,
+    check_indices_in_range,
+    check_non_finite,
+    check_persistent_unstable,
+    check_record_count,
+    check_record_width,
+    check_role_conflict,
+    check_run_max_exceeds,
+    check_thp_monotonic,
+    check_units_mismatch,
+    check_unstable_branch,
+)
 
 
 @dataclass(frozen=True)
@@ -65,6 +83,12 @@ CHECK_REGISTRY: tuple[CheckDef, ...] = (
              "table not referenced by any well or branch", check_dead_table),
     CheckDef("ROLE_CONFLICT", "well/branch conflict", "WARNING",
              "table referenced by both a well and a branch", check_role_conflict),
+    CheckDef("CLAMP_FRACTION", "clamped timesteps", "WARNING",
+             "fraction of timesteps clamped on an axis above threshold", check_clamp_fraction),
+    CheckDef("RUN_MAX_EXCEEDS", "run max vs table max", "WARNING",
+             "run maximum exceeds the table maximum (extrapolation)", check_run_max_exceeds),
+    CheckDef("PERSISTENT_UNSTABLE", "persistent unstable branch", "WARNING",
+             "well operating persistently on the unstable branch", check_persistent_unstable),
 )
 
 _CHECK_BY_ID = {c.check_id: c for c in CHECK_REGISTRY}

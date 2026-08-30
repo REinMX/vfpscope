@@ -20,16 +20,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..model import (
-    ALQ_TYPES,
     AXIS_ORDER,
-    GFR_TYPES,
-    SEVERITY_ORDER,
-    THP_TYPES,
-    UNIT_SYSTEMS,
-    TABULATED_TYPES,
-    VFPINJ_FLO_TYPES,
-    VFPPROD_FLO_TYPES,
-    WFR_TYPES,
     Finding,
     VfpTable,
 )
@@ -98,7 +89,7 @@ def check_non_finite(table: VfpTable, ctx: QCContext) -> list[Finding]:
     idx = np.argwhere(bad)[0]
     return [_f(table, "ERROR", "NON_FINITE",
                f"{int(bad.sum())} non-finite value(s) in the hypercube "
-               f"(first at {dict(zip(AXIS_ORDER, idx.tolist()))})",
+               f"(first at {dict(zip(AXIS_ORDER, idx.tolist(), strict=True))})",
                locus={"indices": idx.tolist()})]
 
 
@@ -225,7 +216,7 @@ def check_absurd_bhp(table: VfpTable, ctx: QCContext) -> list[Finding]:
     first = np.argwhere(bad)[0]
     return [_f(table, "ERROR", "ABSURD_BHP",
                f"{n} tabulated value(s) <= 0 or > {hi:g}: first at "
-               f"{dict(zip(AXIS_ORDER, first.tolist()))}",
+               f"{dict(zip(AXIS_ORDER, first.tolist(), strict=True))}",
                locus={"indices": first.tolist()})]
 
 
@@ -243,7 +234,7 @@ def check_bhp_below_thp(table: VfpTable, ctx: QCContext) -> list[Finding]:
     first = np.argwhere(bad)[0]
     return [_f(table, "WARNING", "BHP_LT_THP",
                f"{n} point(s) with BHP below THP (negative total pressure drop), "
-               f"first at {dict(zip(AXIS_ORDER, first.tolist()))}",
+               f"first at {dict(zip(AXIS_ORDER, first.tolist(), strict=True))}",
                locus={"indices": first.tolist()})]
 
 
@@ -387,3 +378,83 @@ def check_role_conflict(table: VfpTable, ctx: QCContext) -> list[Finding]:
             plot_hint={"kind": "role_conflict"},
         )]
     return []
+
+
+# ------------------------------------------------------------------ coverage (21-23)
+
+
+def check_clamp_fraction(table: VfpTable, ctx: QCContext) -> list[Finding]:
+    """Fraction of simulated timesteps clamped on each axis, per well."""
+    if not ctx.coverage:
+        return []
+    thr = ctx.thresholds.get("clamp_warning_frac", 0.05)
+    findings: list[Finding] = []
+    for report in ctx.coverage.get(table.number, []):
+        for a in report.axes_with_data:
+            frac = report.fraction_clamped(a)
+            if frac >= thr:
+                findings.append(_f(
+                    table, "WARNING", "CLAMP_FRACTION",
+                    f"well {report.well}: {frac * 100:.1f}% of {report.n_timesteps} "
+                    f"timesteps clamped on {a} "
+                    f"(low {report.fraction_clamped_low(a) * 100:.1f}%, "
+                    f"high {report.fraction_clamped_high(a) * 100:.1f}%)",
+                    locus={"well": report.well, "axis": a, "fraction": frac},
+                    plot_hint={"kind": "clamped", "well": report.well, "axis": a},
+                ))
+    return findings
+
+
+def check_run_max_exceeds(table: VfpTable, ctx: QCContext) -> list[Finding]:
+    """Run maximum on an axis exceeding the table maximum (report the ratio)."""
+    if not ctx.coverage:
+        return []
+    findings: list[Finding] = []
+    for report in ctx.coverage.get(table.number, []):
+        for a in report.axes_with_data:
+            ratio = report.run_max_over_table(a, table)
+            if ratio is not None and ratio > 1.0 + 1e-9:
+                findings.append(_f(
+                    table, "WARNING", "RUN_MAX_EXCEEDS",
+                    f"well {report.well}: run maximum on {a} is {ratio:.2f}x the "
+                    f"table maximum — table is being extrapolated (clamped)",
+                    locus={"well": report.well, "axis": a, "ratio": ratio},
+                ))
+    return findings
+
+
+def check_persistent_unstable(table: VfpTable, ctx: QCContext) -> list[Finding]:
+    """Well operating persistently on the unstable branch (check 10 finding)."""
+    if not ctx.coverage or table.axes["FLO"].values.size < 3:
+        return []
+    # turning-point rates per curve (same logic as check 10)
+    flo = table.axes["FLO"].values
+    turning_rates: list[float] = []
+    for ti in range(table.axes["THP"].values.size):
+        for w in range(table.axes["WFR"].values.size):
+            for g in range(table.axes["GFR"].values.size):
+                for a in range(table.axes["ALQ"].values.size):
+                    curve = table.data[ti, w, g, a, :]
+                    d = np.sign(np.diff(curve))
+                    turns = np.where(np.diff(d) != 0)[0]
+                    if turns.size:
+                        turning_rates.append(float(flo[int(turns[0]) + 1]))
+    if not turning_rates:
+        return []
+    min_turn = min(turning_rates)
+    thr = ctx.thresholds.get("unstable_frac", 0.2)
+    findings: list[Finding] = []
+    for report in ctx.coverage.get(table.number, []):
+        flo_run = report.axis_values.get("FLO")
+        if flo_run is None or flo_run.size == 0:
+            continue
+        frac = float(np.mean(flo_run >= min_turn))
+        if frac >= thr:
+            findings.append(_f(
+                table, "WARNING", "PERSISTENT_UNSTABLE",
+                f"well {report.well} operates {frac * 100:.1f}% of timesteps at or "
+                f"above the unstable-branch turning point "
+                f"({table.axes['FLO'].kind}={min_turn:g} {table.axes['FLO'].unit})",
+                locus={"well": report.well, "turning_rate": min_turn, "fraction": frac},
+            ))
+    return findings

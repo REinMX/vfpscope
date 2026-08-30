@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from streamlit.testing.v1 import AppTest
 
 FIXTURES = Path(__file__).parent / "fixtures"

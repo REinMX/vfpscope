@@ -12,7 +12,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from vfpscope.core.model import AXIS_ORDER
 from vfpscope.core.parse.native import load_deck
 
 pytestmark = pytest.mark.skipif(

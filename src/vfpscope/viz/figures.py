@@ -6,8 +6,6 @@ CLI (PNG/HTML export) and the report builder.
 
 from __future__ import annotations
 
-from typing import Iterable
-
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -301,6 +299,174 @@ def apply_plot_hint(fig: go.Figure, hint: dict | None) -> None:
                 hovertemplate="clamped: %{x:.6g}, %{y:.6g}<extra></extra>",
             )
         )
+
+
+def coverage_overlay_figure(table, report) -> go.Figure:
+    """Operating envelope vs table: clamped scatter + per-axis coverage bars.
+
+    Top: run points (FLO vs WBHP, or FLO vs THP when WBHP is missing),
+    coloured red when any axis was clamped; table's first THP curves drawn as
+    reference. Bottom: per-axis stacked bars (in-range / clamped low / high).
+    """
+    flo = report.axis_values.get("FLO")
+    if flo is None:
+        raise ValueError("coverage report has no FLO data")
+    bhp = report.bhp if report.bhp is not None else report.axis_values.get("THP")
+    any_clamped = np.zeros(flo.size, dtype=bool)
+    for a in report.axes_with_data:
+        any_clamped |= report.clamped_low[a] | report.clamped_high[a]
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+        subplot_titles=("run envelope vs table (clamped points in red)",
+                        "per-axis coverage (fraction of timesteps)"),
+    )
+    unit = table.axes["FLO"].unit
+    fig.add_trace(
+        go.Scatter(x=flo, y=bhp, mode="markers",
+                   marker=dict(size=5, color=["#c0392b" if c else "#1f77b4" for c in any_clamped],
+                               opacity=0.7),
+                   name="run (clamped=red)",
+                   hovertemplate="FLO: %{x:.6g}<br>BHP: %{y:.6g}<extra></extra>"),
+        row=1, col=1,
+    )
+    # reference: first few table curves (THP family at fixed WFR/GFR/ALQ=0)
+    try:
+        ref = lift_curve_figure(table, x_axis="FLO", family="THP",
+                                fixed={"WFR": 0, "GFR": 0, "ALQ": 0})
+        for tr in ref.data:
+            tr.showlegend = False
+            tr.marker = dict(size=3)
+            fig.add_trace(tr, row=1, col=1)
+    except ValueError:
+        pass
+    axes = [a for a in report.axes_with_data]
+    low = [report.fraction_clamped_low(a) for a in axes]
+    high = [report.fraction_clamped_high(a) for a in axes]
+    ok = [1.0 - lo - hi for lo, hi in zip(low, high, strict=True)]
+    fig.add_trace(go.Bar(x=axes, y=ok, name="in range", marker_color="#1e8449"), row=2, col=1)
+    fig.add_trace(go.Bar(x=axes, y=low, name="clamped low", marker_color="#b9770e"), row=2, col=1)
+    fig.add_trace(go.Bar(x=axes, y=high, name="clamped high", marker_color="#c0392b"), row=2, col=1)
+    fig.update_layout(
+        barmode="stack",
+        title=f"{table.label} — well {report.well} coverage ({report.n_timesteps} timesteps)",
+        template="plotly_white",
+        xaxis2_title=f"rate [{unit}]" if unit else "rate",
+        yaxis2_title="fraction",
+        hovermode="closest",
+    )
+    return fig
+
+
+def compare_figure(tables: list, x_axis: str = "FLO", family: str = "THP",
+                   fixed: dict[str, int] | None = None) -> go.Figure:
+    """Overlay two+ tables on the same axes; unit-system guard per spec 3.5.
+
+    Refuses (ValueError) when tables disagree on unit system or on the
+    FLO/WFR/GFR/ALQ axis *types* — no silent conversion, no apples/oranges.
+    """
+    if len(tables) < 2:
+        raise ValueError("compare needs at least two tables")
+    t0 = tables[0]
+    systems = {t.unit_system for t in tables}
+    if len(systems) > 1:
+        raise ValueError(
+            "cannot overlay tables with differing unit systems "
+            f"({systems}); convert explicitly first"
+        )
+    for axis in ("FLO", "WFR", "GFR", "ALQ"):
+        kinds = {t.axes[axis].kind for t in tables}
+        if len(kinds) > 1:
+            raise ValueError(
+                f"cannot overlay tables with differing {axis} types {kinds}"
+            )
+    fig = go.Figure()
+    unit = t0.axes[family].unit
+    for k, t in enumerate(tables):
+        arr, xvals, famvals = _slice_and_reorder(t, x_axis, family, fixed or {})
+        label = f"table {t.number}" + (f" ({t.label.split('(')[-1][:-1]})" if False else "")
+        for fi in range(arr.shape[0]):
+            fig.add_trace(
+                go.Scatter(x=xvals, y=arr[fi], mode="lines+markers",
+                           name=f"{label} THP={_fmt(famvals[fi], unit)}",
+                           line=dict(color=_COLOR_SEQ[(k * 7 + fi) % len(_COLOR_SEQ)]),
+                           marker=dict(size=4),
+                           hovertemplate=f"{label}: %{{x:.6g}}, %{{y:.6g}}<extra></extra>"),
+            )
+    fig.update_layout(
+        title=" vs ".join(f"table {t.number}" for t in tables),
+        xaxis_title=_axis_label(t0, x_axis),
+        yaxis_title=_y_label(t0),
+        template="plotly_white",
+        hovermode="closest",
+    )
+    return fig
+
+
+def compare_difference_figure(table_a, table_b, x_axis: str = "FLO") -> go.Figure:
+    """Difference panel: table_A minus table_B interpolated onto A's grid."""
+    a = table_a.data
+    b = table_b.data
+    if a.shape != b.shape:
+        raise ValueError(
+            "difference panel requires equal axis grids; "
+            f"shapes {a.shape} vs {b.shape}"
+        )
+    fig = go.Figure()
+    # one trace per THP slice at WFR=GFR=ALQ=0 (first slice), as a compact summary
+    for ti in range(min(a.shape[0], 8)):
+        fig.add_trace(
+            go.Scatter(x=table_a.axes[x_axis].values, y=(a[ti, 0, 0, 0, :] - b[ti, 0, 0, 0, :]),
+                       mode="lines+markers",
+                       name=f"THP={table_a.axes['THP'].values[ti]:g}",
+                       hovertemplate="%{x:.6g}, d(BHP)=%{y:.6g}<extra></extra>"),
+        )
+    fig.update_layout(
+        title=f"table {table_a.number} − table {table_b.number} (BHP difference)",
+        xaxis_title=_axis_label(table_a, x_axis),
+        yaxis_title="difference",
+        template="plotly_white",
+        hovermode="closest",
+    )
+    return fig
+
+
+def network_graph_figure(deck) -> go.Figure:
+    """Static directed graph of BRANPROP/NODEPROP; fixed-pressure nodes marked."""
+    nodes = {name for name, _ in deck.nodes}
+    for dt, ut, _ in deck.branches:
+        nodes.add(dt)
+        nodes.add(ut)
+    nodes = sorted(nodes)
+    fixed = {name for name, p in deck.nodes if p is not None}
+    pos = {n: i for i, n in enumerate(nodes)}
+    fig = go.Figure()
+    for dt, ut, vfp in deck.branches:
+        x0 = pos[dt]
+        x1 = pos[ut]
+        fig.add_trace(
+            go.Scatter(x=[x0, x1], y=[0, 0], mode="lines+markers",
+                       line=dict(color="#7f7f7f", width=2),
+                       marker=dict(size=1),
+                       text=[f"{dt}->{ut} (VFP {vfp})", ""],
+                       hoverinfo="text",
+                       name=f"{dt}->{ut}"),
+        )
+    fig.add_trace(
+        go.Scatter(x=[pos[n] for n in nodes], y=[0] * len(nodes), mode="markers+text",
+                   marker=dict(size=[26 if n in fixed else 16 for n in nodes],
+                               color=["#c0392b" if n in fixed else "#1f77b4" for n in nodes]),
+                   text=nodes, textposition="bottom center",
+                   hovertemplate="%{text}<extra></extra>"),
+    )
+    fig.update_layout(
+        title="network topology (red = fixed pressure)",
+        template="plotly_white",
+        showlegend=False,
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        height=320,
+    )
+    return fig
 
 
 def build_report_html(deck, out) -> None:

@@ -21,26 +21,26 @@ mode used by tests and include inspection).
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 
 from ..model import (
-    AXIS_ORDER,
     ALQ_TYPES,
-    Finding,
+    AXIS_ORDER,
     GFR_TYPES,
-    SourceRef,
+    TABULATED_TYPES,
     THP_TYPES,
     UNIT_SYSTEMS,
-    TABULATED_TYPES,
     VFPINJ_FLO_TYPES,
     VFPPROD_FLO_TYPES,
+    WFR_TYPES,
+    Finding,
+    SourceRef,
     VfpAxis,
     VfpTable,
-    WFR_TYPES,
     resolve_axis_unit,
 )
 

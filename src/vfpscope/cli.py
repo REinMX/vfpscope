@@ -154,7 +154,7 @@ def plot(
             wrote.append(str(png))
         except Exception as e:  # kaleido missing / renderer failure
             typer.echo(f"PNG export failed: {e} (pip install kaleido)", err=True)
-            raise typer.Exit(2)
+            raise typer.Exit(2) from None
     if html:
         fig.write_html(str(html), include_plotlyjs="cdn")
         wrote.append(str(html))

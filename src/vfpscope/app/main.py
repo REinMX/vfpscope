@@ -88,8 +88,8 @@ def main() -> None:
     table_no = int(sel.split(" ")[0].lstrip("#"))
     table = deck.tables[table_no]
 
-    tab_curves, tab_heatmap, tab_qc, tab_compare, tab_coverage = st.tabs(
-        ["Curves", "Heatmap", "QC", "Compare", "Coverage"]
+    tab_curves, tab_heatmap, tab_qc, tab_compare, tab_coverage, tab_network = st.tabs(
+        ["Curves", "Heatmap", "QC", "Compare", "Coverage", "Network"]
     )
 
     with tab_curves:
@@ -102,6 +102,8 @@ def main() -> None:
         _view_compare(deck, table)
     with tab_coverage:
         _view_coverage(deck, table)
+    with tab_network:
+        _view_network(deck, table)
 
 
 def _fixed_sliders(table, exclude: set[str], key_prefix: str = "s"):
@@ -200,22 +202,79 @@ def _view_qc(deck, table) -> None:
 
 
 def _view_compare(deck, table) -> None:
-    st.info("Compare mode lands with the M6 milestone: pick a second deck/table to overlay.")
-    other = st.sidebar.text_input("Second deck path (compare)")
-    if other and os.path.exists(other):
+    from vfpscope.viz.figures import compare_difference_figure, compare_figure
+
+    st.markdown("Overlay a second table on the same axes (unit-system guard active).")
+    other = st.sidebar.text_input("Second deck / include path (compare)")
+    if not other or not os.path.exists(other):
+        st.info("Enter a second deck path to compare.")
+        return
+    try:
+        other_deck = parse_deck(str(Path(other).resolve()))
+    except VfpParseError as e:
+        st.error(str(e))
+        return
+    opts = [f"#{no} {other_deck.tables[no].kind}" for no in other_deck.table_order]
+    other_no = int(st.sidebar.selectbox("Second table", opts, index=0).split(" ")[0].lstrip("#"))
+    other_table = other_deck.tables[other_no]
+    try:
+        fig = compare_figure([table, other_table])
+        st.plotly_chart(fig, use_container_width=True)
         try:
-            other_deck = parse_deck(str(Path(other).resolve()))
-            st.write(f"Second deck: {len(other_deck.tables)} table(s).")
-            st.warning("Overlay implementation pending (M6).")
-        except VfpParseError as e:
-            st.error(str(e))
+            dfig = compare_difference_figure(table, other_table)
+            st.plotly_chart(dfig, use_container_width=True)
+        except ValueError as e:
+            st.warning(f"Difference panel skipped: {e}")
+    except ValueError as e:
+        st.error(str(e))
 
 
 def _view_coverage(deck, table) -> None:
-    st.info("Coverage overlay against simulation output lands with the M5 milestone.")
+    from vfpscope.core.coverage import CoverageUnavailable, coverage_for_deck
+
+    st.markdown(
+        "Coverage vs simulation output: paste the path of a `.UNSMRY` file "
+        "(requires `pip install vfpscope[resdata]`)."
+    )
     smry = st.sidebar.text_input("UNSMRY path (coverage)")
-    if smry and os.path.exists(smry):
-        st.warning("Coverage module pending (M5).")
+    if not smry or not os.path.exists(smry):
+        st.info("Enter a summary path to compute coverage.")
+        return
+    try:
+        reports_by_table = coverage_for_deck(deck, smry)
+    except CoverageUnavailable as e:
+        st.error(str(e))
+        return
+    reports = reports_by_table.get(table.number, [])
+    if not reports:
+        st.info(f"No coverage vectors found for table {table.number} in that run.")
+        return
+    from vfpscope.viz.figures import coverage_overlay_figure
+
+    for rep in reports:
+        st.plotly_chart(coverage_overlay_figure(table, rep), use_container_width=True)
+        st.caption(
+            "per-axis clamped fractions: "
+            + ", ".join(
+                f"{a} {rep.fraction_clamped(a) * 100:.1f}%"
+                for a in rep.axes_with_data
+            )
+        )
+
+
+def _view_network(deck, table) -> None:
+    from vfpscope.viz.figures import network_graph_figure
+
+    if not deck.branches:
+        st.info("No BRANPROP branches in this deck.")
+        return
+    st.plotly_chart(network_graph_figure(deck), use_container_width=True)
+    st.markdown("Branches (click-through via the Curves tab):")
+    for dt, ut, vfp in deck.branches:
+        t = deck.tables.get(vfp)
+        label = f"VFP {vfp}" + (f" — {t.axes['FLO'].kind} {t.axes['FLO'].values[-1]:g} {t.axes['FLO'].unit}"
+                                if t else "")
+        st.markdown(f"- **{dt} → {ut}**: {label}")
 
 
 if __name__ == "__main__":

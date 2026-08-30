@@ -77,7 +77,7 @@ def _lookup_many(table: VfpTable, coords: dict[str, np.ndarray]) -> tuple[np.nda
     for corner in product((0, 1), repeat=len(AXIS_ORDER)):
         w = np.ones(n)
         idx: list[np.ndarray] = []
-        for a, c in zip(AXIS_ORDER, corner):
+        for a, c in zip(AXIS_ORDER, corner, strict=True):
             idx.append(i1s[a] if c else i0s[a])
             w = w * (ts[a] if c else (1.0 - ts[a]))
         value += w * table.data[tuple(idx)]
@@ -113,7 +113,7 @@ def lookup(
         coords = {a: c.reshape(1) for a, c in coords.items()}
     else:
         n = coords["FLO"].size
-        for a, c in coords.items():
+        for a, c in coords.items():  # noqa: B007 (a unused; dict comprehension below)
             if c.ndim > 0 and c.size != n:
                 raise ValueError(
                     "all query coordinates must be scalars or equal-length arrays"

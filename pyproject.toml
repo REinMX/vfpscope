@@ -45,3 +45,6 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# E501: unit tables and CLI signatures stay readable over 100 cols
+# B008: typer.Argument/Option call-in-default is the idiomatic Typer pattern
+ignore = ["E501", "B008"]

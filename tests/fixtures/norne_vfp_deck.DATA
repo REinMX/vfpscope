@@ -1,0 +1,77 @@
+-- VFPScope M1 acceptance deck: 10 real Norne VFP tables + synthetic controls.
+-- Tables 1,2,3,4,5,6,8,9 = VFPPROD (wells/flowlines); 12,17 = VFPINJ (injectors).
+-- Deliberate QC-relevant conditions:
+--   * table 6  (GAS_PD2.VFP)  -> not referenced by anything (dead table)
+--   * table 8  (pd2.VFP)      -> used by well PD2W AND branch FLS (conflict)
+--   * well D1  (OIL)          -> uses table 5 (GAS FLO) (fluid mismatch)
+--   * well E1  -> WLIFTOPT declared but table 2 has no ALQ axis (length 1)
+RUNSPEC
+METRIC
+OIL
+WATER
+GAS
+DISGAS
+VFPPDIMS
+ 20 20 20 20 20 /
+VFPIDIMS
+ 20 20 /
+NETWORK
+ 10 10 /
+SCHEDULE
+WELSPECS
+ 'B1'   'G1' 5 5 2600.0  'OIL' /
+ 'E1'   'G1' 5 5 2619.0  'OIL' /
+ 'A1'   'G1' 5 5 2629.7  'OIL' /
+ 'G1W'  'G1' 5 5 2580.0  'GAS' /
+ 'D1'   'G1' 5 5 2600.0  'OIL' /
+ 'PD2W' 'G1' 5 5 400.0   'OIL' /
+ 'PE2W' 'G1' 5 5 400.0   'OIL' /
+ 'C1'   'G1' 5 5 2718.07 'WAT' /
+ 'F1'   'G1' 5 5 2733.7  'WAT' /
+/
+WLIFTOPT
+ 'E1' 1.0 100.0 /
+/
+BRANPROP
+ 'FLS' 'FIELD' 8 1* /
+ 'FLN' 'FIELD' 9 1* /
+/
+NODEPROP
+ 'FIELD' 80.0 /
+ 'FLS' 1* /
+ 'FLN' 1* /
+/
+WCONPROD
+ 'B1'   OPEN ORAT 1* 1* 1* 1* 1* 1* 1* 1 /
+ 'E1'   OPEN ORAT 1* 1* 1* 1* 1* 1* 1* 2 /
+ 'A1'   OPEN ORAT 1* 1* 1* 1* 1* 1* 1* 3 /
+ 'G1W'  OPEN ORAT 1* 1* 1* 1* 1* 1* 1* 4 /
+ 'D1'   OPEN ORAT 1* 1* 1* 1* 1* 1* 1* 5 /
+ 'PD2W' OPEN ORAT 1* 1* 1* 1* 1* 1* 1* 8 /
+ 'PE2W' OPEN ORAT 1* 1* 1* 1* 1* 1* 1* 9 /
+/
+WCONINJE
+ 'C1' WAT OPEN RATE 1000 1* 1* 1* 12 /
+ 'F1' WAT OPEN RATE 1000 1* 1* 1* 17 /
+/
+INCLUDE
+ './norne/DevNew.VFP' /
+INCLUDE
+ './norne/E1h.VFP' /
+INCLUDE
+ './norne/AlmostVertNew.VFP' /
+INCLUDE
+ './norne/GasProd.VFP' /
+INCLUDE
+ './norne/NEW_D2_GAS_0.00003.VFP' /
+INCLUDE
+ './norne/GAS_PD2.VFP' /
+INCLUDE
+ './norne/pd2.VFP' /
+INCLUDE
+ './norne/pe2.VFP' /
+INCLUDE
+ './norne/C1H.Ecl' /
+INCLUDE
+ './norne/F1H.Ecl' /
+END

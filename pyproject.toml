@@ -1,0 +1,47 @@
+[project]
+name = "vfpscope"
+version = "0.1.0"
+description = "Interactive VFP table visualizer for Eclipse/OPM Flow decks (VFPPROD / VFPINJ)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.26",
+    "pydantic>=2.5",
+    "plotly>=5.20",
+    "streamlit>=1.35",
+    "typer>=0.12",
+    "rich>=13",
+    "scipy>=1.11",
+    "kaleido>=0.2.1",
+]
+
+[project.optional-dependencies]
+res2df = ["res2df>=1.0"]
+resdata = ["resdata>=6.3"]
+test = ["pytest>=8.0", "pytest-regressions>=2.5", "ruff>=0.4"]
+
+[project.scripts]
+vfpscope = "vfpscope.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vfpscope"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "streamlit: Streamlit AppTest-based GUI tests",
+    "corpus: tests requiring the local opm-tests corpus zip",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

@@ -2,13 +2,13 @@
 """VFPScope standalone Streamlit application.
 
 Copy this single file into a Python 3.11+ environment containing NumPy,
-Pydantic 2, Plotly, and Streamlit, then run:
+Pydantic 2, Plotly, Streamlit, and resdata, then run:
 
     streamlit run vfpscope_standalone.py -- --deck MODEL.DATA
 
 This standalone edition supports native VFPPROD/VFPINJ parsing, deck consumer
-references, QC, curves, heatmaps, table comparison, and network visualization.
-It intentionally omits simulation-summary operating-envelope analysis.
+references, QC, curves, heatmaps, table comparison, network visualization, and
+simulation-summary operating-envelope coverage from Eclipse/OPM .UNSMRY files.
 """
 
 from __future__ import annotations
@@ -850,6 +850,142 @@ def lookup(table: VfpTable, *, flo: float | np.ndarray, thp: float | np.ndarray,
     return LookupResult(value=values, clamped_masks=masks)
 
 # -----------------------------------------------------------------------------
+# Flattened from src/vfpscope/core/coverage.py
+# -----------------------------------------------------------------------------
+
+_VECTORS: dict[str, dict[str, str | tuple[str, ...] | None]] = {'FLO': {'OIL': 'WOPR', 'LIQ': ('WOPR', 'WWPR'), 'GAS': 'WGPR', 'WG': ('WOPR', 'WWPR', 'WGPR'), 'TM': ('WOPR', 'WWPR', 'WGPR'), 'WAT': 'WWIR'}, 'THP': {'THP': 'WTHP'}, 'WFR': {'WOR': ('WWPR', 'WOPR'), 'WCT': 'WWCT', 'WGR': 'WWGR', 'WWR': None, 'WTF': None}, 'GFR': {'GOR': 'WGOR', 'GLR': 'WGLR', 'OGR': None, 'MMW': None}, 'ALQ': {'GRAT': 'WGLIR', 'IGLR': None, 'TGLR': None, 'PUMP': None, 'COMP': None, 'DENO': None, 'DENG': None, 'BEAN': None, '': None}}
+
+class CoverageUnavailable(RuntimeError):
+    """resdata (or the summary file) is not available."""
+
+@dataclass
+class CoverageReport:
+    """Per-well coverage of a table by one run's operating envelope."""
+    table_number: int
+    well: str
+    n_timesteps: int
+    axis_values: dict[str, np.ndarray | None] = field(default_factory=dict)
+    clamped_low: dict[str, np.ndarray | None] = field(default_factory=dict)
+    clamped_high: dict[str, np.ndarray | None] = field(default_factory=dict)
+    bhp: np.ndarray | None = None
+
+    @property
+    def axes_with_data(self) -> list[str]:
+        return [a for a in AXIS_ORDER if self.axis_values.get(a) is not None]
+
+    def fraction_clamped(self, axis: str) -> float:
+        lo = self.clamped_low.get(axis)
+        hi = self.clamped_high.get(axis)
+        if lo is None or hi is None:
+            return 0.0
+        return float(np.mean(lo | hi))
+
+    def fraction_clamped_low(self, axis: str) -> float:
+        lo = self.clamped_low.get(axis)
+        return float(np.mean(lo)) if lo is not None else 0.0
+
+    def fraction_clamped_high(self, axis: str) -> float:
+        hi = self.clamped_high.get(axis)
+        return float(np.mean(hi)) if hi is not None else 0.0
+
+    def run_max_over_table(self, axis: str, table: VfpTable) -> float | None:
+        v = self.axis_values.get(axis)
+        tmax = float(table.axes[axis].values[-1])
+        if v is None or tmax <= 0:
+            return None
+        return float(v.max()) / tmax
+
+    def run_min_under_table(self, axis: str, table: VfpTable) -> float | None:
+        v = self.axis_values.get(axis)
+        tmin = float(table.axes[axis].values[0])
+        if v is None or tmin <= 0:
+            return None
+        return float(v.min()) / tmin
+
+def _resolve(smry, well: str, spec) -> np.ndarray | None:
+    if spec is None:
+        return None
+    names = spec if isinstance(spec, tuple) else (spec,)
+    try:
+        parts = []
+        for n in names:
+            key = f'{n}:{well}'
+            try:
+                vec = np.asarray(smry.numpy_vector(key), dtype=float)
+            except (KeyError, TypeError, ValueError):
+                return None
+            parts.append(vec)
+        if not parts:
+            return None
+        out = parts[0]
+        for p in parts[1:]:
+            out = out + p
+        return out
+    except Exception:
+        return None
+
+def _ratio_from_components(parts: list[np.ndarray]) -> np.ndarray:
+    """WOR-style ratio: num/den with den==0 guarded to 0."""
+    num, den = (parts[0], parts[1])
+    out = np.zeros_like(num)
+    np.divide(num, den, out=out, where=den > 0)
+    return out
+
+def coverage_from_summary(table: VfpTable, well: str, smry) -> CoverageReport:
+    """Evaluate one well's run envelope against one table."""
+    n = None
+    axis_values: dict[str, np.ndarray | None] = {}
+    for a in AXIS_ORDER:
+        kind = table.axes[a].kind
+        spec = _VECTORS[a].get(kind)
+        if a == 'WFR' and kind == 'WOR':
+            num = _resolve(smry, well, 'WWPR')
+            den = _resolve(smry, well, 'WOPR')
+            vec = _ratio_from_components([num, den]) if num is not None and den is not None else None
+        else:
+            vec = _resolve(smry, well, spec)
+        axis_values[a] = vec
+        if vec is not None:
+            n = vec.size
+    if n is None:
+        raise CoverageUnavailable(f'no summary vectors match table {table.number} for well {well}')
+    wbhp = _resolve(smry, well, 'WBHP')
+    coords = {}
+    for a in AXIS_ORDER:
+        v = axis_values[a]
+        coords[a] = v if v is not None else np.full(n, float(table.axes[a].values[0]))
+    _, masks = _lookup_many(table, coords)
+    clamped_low = {a: masks[a][0] if axis_values[a] is not None else None for a in AXIS_ORDER}
+    clamped_high = {a: masks[a][1] if axis_values[a] is not None else None for a in AXIS_ORDER}
+    return CoverageReport(table_number=table.number, well=well, n_timesteps=n, axis_values=axis_values, clamped_low=clamped_low, clamped_high=clamped_high, bhp=wbhp)
+
+def load_summary(path: str | Path):
+    """Load a summary file via resdata (case stem without extension)."""
+    p = Path(path)
+    stem = str(p.with_suffix(''))
+    try:
+        from resdata.summary import Summary
+    except ImportError as e:
+        raise CoverageUnavailable('resdata is not installed in this Python environment') from e
+    return Summary(stem)
+
+def coverage_for_deck(deck, smry_path: str | Path) -> dict[int, list[CoverageReport]]:
+    """Coverage reports for every (table, consuming well) pair in a deck."""
+    smry = load_summary(smry_path)
+    out: dict[int, list[CoverageReport]] = {}
+    for no in deck.table_order:
+        t = deck.tables[no]
+        reports = []
+        for well in t.consumers.wells:
+            try:
+                reports.append(coverage_from_summary(t, well, smry))
+            except CoverageUnavailable:
+                continue
+        if reports:
+            out[no] = reports
+    return out
+
+# -----------------------------------------------------------------------------
 # Flattened from src/vfpscope/core/qc/checks.py
 # -----------------------------------------------------------------------------
 
@@ -1352,6 +1488,41 @@ def apply_plot_hint(fig: go.Figure, hint: dict | None) -> None:
     elif kind == 'clamped' and 'x' in hint and ('y' in hint):
         fig.add_trace(go.Scatter(x=hint['x'], y=hint['y'], mode='markers', marker=dict(size=6, color='red', opacity=0.6), name='clamped timesteps', hovertemplate='clamped: %{x:.6g}, %{y:.6g}<extra></extra>'))
 
+def coverage_overlay_figure(table, report) -> go.Figure:
+    """Operating envelope vs table: clamped scatter + per-axis coverage bars.
+
+    Top: run points (FLO vs WBHP, or FLO vs THP when WBHP is missing),
+    coloured red when any axis was clamped; table's first THP curves drawn as
+    reference. Bottom: per-axis stacked bars (in-range / clamped low / high).
+    """
+    flo = report.axis_values.get('FLO')
+    if flo is None:
+        raise ValueError('coverage report has no FLO data')
+    bhp = report.bhp if report.bhp is not None else report.axis_values.get('THP')
+    any_clamped = np.zeros(flo.size, dtype=bool)
+    for a in report.axes_with_data:
+        any_clamped |= report.clamped_low[a] | report.clamped_high[a]
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08, subplot_titles=('run envelope vs table (clamped points in red)', 'per-axis coverage (fraction of timesteps)'))
+    unit = table.axes['FLO'].unit
+    fig.add_trace(go.Scatter(x=flo, y=bhp, mode='markers', marker=dict(size=5, color=['#c0392b' if c else '#1f77b4' for c in any_clamped], opacity=0.7), name='run (clamped=red)', hovertemplate='FLO: %{x:.6g}<br>BHP: %{y:.6g}<extra></extra>'), row=1, col=1)
+    try:
+        ref = lift_curve_figure(table, x_axis='FLO', family='THP', fixed={'WFR': 0, 'GFR': 0, 'ALQ': 0})
+        for tr in ref.data:
+            tr.showlegend = False
+            tr.marker = dict(size=3)
+            fig.add_trace(tr, row=1, col=1)
+    except ValueError:
+        pass
+    axes = [a for a in report.axes_with_data]
+    low = [report.fraction_clamped_low(a) for a in axes]
+    high = [report.fraction_clamped_high(a) for a in axes]
+    ok = [1.0 - lo - hi for lo, hi in zip(low, high, strict=True)]
+    fig.add_trace(go.Bar(x=axes, y=ok, name='in range', marker_color='#1e8449'), row=2, col=1)
+    fig.add_trace(go.Bar(x=axes, y=low, name='clamped low', marker_color='#b9770e'), row=2, col=1)
+    fig.add_trace(go.Bar(x=axes, y=high, name='clamped high', marker_color='#c0392b'), row=2, col=1)
+    fig.update_layout(barmode='stack', title=f'{table.label} — well {report.well} coverage ({report.n_timesteps} timesteps)', template='plotly_white', xaxis2_title=f'rate [{unit}]' if unit else 'rate', yaxis2_title='fraction', hovermode='closest')
+    return fig
+
 def compare_figure(tables: list, x_axis: str='FLO', family: str='THP', fixed: dict[str, int] | None=None) -> go.Figure:
     """Overlay two+ tables on the same axes; unit-system guard per spec 3.5.
 
@@ -1499,7 +1670,7 @@ def main() -> None:
     sel = st.sidebar.selectbox('Table', options, index=0)
     table_no = int(sel.split(' ')[0].lstrip('#'))
     table = deck.tables[table_no]
-    tab_curves, tab_heatmap, tab_qc, tab_compare, tab_network = st.tabs(['Curves', 'Heatmap', 'QC', 'Compare', 'Network'])
+    tab_curves, tab_heatmap, tab_qc, tab_compare, tab_coverage, tab_network = st.tabs(['Curves', 'Heatmap', 'QC', 'Compare', 'Coverage', 'Network'])
     with tab_curves:
         _view_curves(deck, table)
     with tab_heatmap:
@@ -1508,6 +1679,8 @@ def main() -> None:
         _view_qc(deck, table)
     with tab_compare:
         _view_compare(deck, table)
+    with tab_coverage:
+        _view_coverage(deck, table)
     with tab_network:
         _view_network(deck, table)
 
@@ -1589,6 +1762,25 @@ def _view_compare(deck, table) -> None:
             st.warning(f'Difference panel skipped: {e}')
     except ValueError as e:
         st.error(str(e))
+
+def _view_coverage(deck, table) -> None:
+    st.markdown('Coverage vs simulation output: paste the path of a `.UNSMRY` file (requires `resdata`).')
+    smry = st.sidebar.text_input('UNSMRY path (coverage)')
+    if not smry or not os.path.exists(smry):
+        st.info('Enter a summary path to compute coverage.')
+        return
+    try:
+        reports_by_table = coverage_for_deck(deck, smry)
+    except CoverageUnavailable as e:
+        st.error(str(e))
+        return
+    reports = reports_by_table.get(table.number, [])
+    if not reports:
+        st.info(f'No coverage vectors found for table {table.number} in that run.')
+        return
+    for rep in reports:
+        st.plotly_chart(coverage_overlay_figure(table, rep), use_container_width=True)
+        st.caption('per-axis clamped fractions: ' + ', '.join(f'{a} {rep.fraction_clamped(a) * 100:.1f}%' for a in rep.axes_with_data))
 
 def _view_network(deck, table) -> None:
     if not deck.branches:

@@ -30,7 +30,6 @@ def test_standalone_is_one_self_contained_python_file():
     source = STANDALONE.read_text()
     assert "from vfpscope" not in source
     assert "import vfpscope" not in source
-    assert "resdata" not in source
 
 
 def test_standalone_imports_only_declared_runtime_dependencies():
@@ -53,7 +52,13 @@ def test_standalone_imports_only_declared_runtime_dependencies():
         "sys",
         "typing",
     }
-    assert import_roots - stdlib == {"numpy", "plotly", "pydantic", "streamlit"}
+    assert import_roots - stdlib == {
+        "numpy",
+        "plotly",
+        "pydantic",
+        "resdata",
+        "streamlit",
+    }
 
 
 def test_standalone_parser_and_qc_match_expected_fixture_behavior():
@@ -73,11 +78,36 @@ def test_standalone_builds_interactive_lift_curve():
     np.testing.assert_allclose(figure.data[0].y, table.data[0, 0, 0, 0, :])
 
 
+def test_standalone_builds_summary_coverage_report_and_overlay():
+    standalone = _load_standalone()
+    table = standalone.parse_vfp_file(FIXTURES / "synthetic_2x3x2x2x2.inc")
+
+    class SummaryFake:
+        vectors = {
+            "WOPR:PROD": np.array([5.0, 10.0, 20.0]),
+            "WWPR:PROD": np.array([5.0, 10.0, 10.0]),
+            "WTHP:PROD": np.array([100.0, 200.0, 300.0]),
+            "WWCT:PROD": np.array([0.0, 0.5, 1.0]),
+            "WGOR:PROD": np.array([100.0, 150.0, 200.0]),
+            "WBHP:PROD": np.array([160.0, 220.0, 310.0]),
+        }
+
+        def numpy_vector(self, key: str) -> np.ndarray:
+            return self.vectors[key]
+
+    report = standalone.coverage_from_summary(table, "PROD", SummaryFake())
+    assert report.n_timesteps == 3
+    assert report.fraction_clamped_high("FLO") > 0.0
+    figure = standalone.coverage_overlay_figure(table, report)
+    assert len(figure.data) >= 4
+
+
 @pytest.mark.streamlit
 def test_standalone_streamlit_app_loads_real_deck():
     os.environ["VFPSCOPE_DECK"] = str(FIXTURES / "norne_vfp_deck.DATA")
     app = AppTest.from_file(str(STANDALONE), default_timeout=15)
     app.run()
     assert not app.exception, app.exception
+    assert "Coverage" in [tab.label for tab in app.tabs]
     assert any("#1 VFPPROD WELL" in option for option in app.selectbox[0].options)
     assert len(app.slider) >= 2

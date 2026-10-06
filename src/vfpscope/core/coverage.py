@@ -1,9 +1,13 @@
-"""Coverage analysis (M5): simulated operating envelope vs table ranges.
+"""Coverage analysis: simulated operating envelope vs table ranges.
 
 Loads a run's summary (via ``resdata``, optional) and, per consuming well,
-extracts the vectors matching the table's FLO/WFR/GFR/ALQ/THP types, runs the
-same clamped lookup the simulator uses, and reports per-axis clamping
-fractions and range exceedances.
+extracts the vectors matching the table's FLO/WFR/GFR/ALQ/THP types. Points
+outside an axis are flagged. That flag is the coverage problem.
+
+Eclipse (the Petrel simulation run) linearly extrapolates outside the table.
+The clamped lookup value is the table edge, not the Eclipse bottom-hole
+pressure. OPM Flow's edge handling is a separate question; do not report the
+clamped value as either simulator's answer.
 
 ``resdata`` is an optional dependency: the analysis core works against any
 object exposing ``numpy_vector(key)`` (see SummaryFake in the tests), so the

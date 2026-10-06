@@ -32,13 +32,33 @@ src/vfpscope/
 │   ├── parse/native.py   Dependency-free Eclipse parser
 │   ├── refs.py           Well/branch references and role inference
 │   ├── interp.py         Multilinear lookup with edge clamping
+│   ├── petrel.py         Petrel labels, run gate, Eclipse-style edge extrapolation
 │   ├── derive.py         Delta-P, gradients and turning points
 │   ├── coverage.py       UNSMRY operating-envelope analysis
 │   └── qc/               Pure QC checks and registry
 ├── viz/figures.py        Pure Plotly figure builders
-├── app/main.py           Streamlit UI
+├── app/main.py           Streamlit GUI (Petrel simulation workspace)
 └── cli.py                Typer CLI
 ```
+
+## Petrel / Eclipse lookup
+
+`lookup()` clamps at the table edge and reports that. Do not present that
+value as the Petrel run.
+
+Eclipse linearly extrapolates outside `VFPPROD` / `VFPINJ` (Reference Manual,
+VFPPROD: "linear extrapolation is used"). `evaluate_operating_point()` returns:
+
+- `linear_bhp` — multilinear interpolation, continued on the nearest edge
+  segment when the point is outside. Not an Eclipse executable result.
+- `edge_bhp` — the clamped boundary. Not the Eclipse answer.
+- a length-1 water, gas or lift axis as independent. Eclipse attaches no slope to it.
+- a single THP on a pressure table as unit slope: dBHP/dTHP = 1. Not applied to a temperature table.
+
+`simulation_brief()` is the run gate: any QC error → do not run; warnings →
+review; otherwise run, still checking that the table covers the development
+strategy. It does not read the Petrel control mode, only the table number in
+`WCONPROD` / `WCONINJE`.
 
 Architectural rules:
 
@@ -127,7 +147,7 @@ Useful focused tests:
 
 ```bash
 uv run pytest tests/test_tokenizer.py tests/test_parse_vfpprod.py
-uv run pytest tests/test_interp.py tests/test_qc.py
+uv run pytest tests/test_interp.py tests/test_petrel.py tests/test_qc.py
 uv run pytest tests/test_app.py
 ```
 
@@ -137,7 +157,8 @@ Before committing a change:
 
 - Parser arrays remain in `(THP, WFR, GFR, ALQ, FLO)` order.
 - Structural failures remain fail-closed and source-located.
-- Lookup clamps edges and reports clamping; it never extrapolates.
+- `lookup` clamps edges and reports clamping; it never extrapolates.
+- `evaluate_operating_point` may continue the edge segment, and its note must keep saying it is not an Eclipse run.
 - WELL and BRANCH labels/derived quantities remain physically distinct.
 - New QC findings include a useful `locus` and, where visual, `plot_hint`.
 - `uv run pytest` and `uv run ruff check src tests` pass.

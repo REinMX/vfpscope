@@ -1,15 +1,16 @@
-"""Multilinear interpolation with simulator-matching clamp semantics.
+"""Multilinear interpolation with edge clamping.
 
-``lookup`` mirrors what the simulator does with a VFP table:
+``lookup`` interpolates inside the table and **clamps** at the edges. The
+clamp is reported so a caller can see that the answer came from a table
+boundary.
 
-* multilinear interpolation inside the hypercube;
-* **clamping, not extrapolation**, at the edges — a query outside the table
-  returns the edge value and reports ``clamped[axis]`` so callers can see
-  that the answer came from a table boundary (the classic silent
-  under-prediction of friction).
+This is not what a Petrel/Eclipse run does outside the table. The Eclipse
+Reference Manual (VFPPROD) specifies linear extrapolation, which can be
+unrealistic. Use ``vfpscope.core.petrel.evaluate_operating_point`` when the
+question is "what will Eclipse do at this development-strategy point?"
 
-Degenerate axes (VFPINJ: WFR/GFR/ALQ length 1) interpolate to their single
-value and are reported as clamped whenever the query is off that value.
+Degenerate axes (VFPINJ: WFR/GFR/ALQ length 1) have no slope. Eclipse treats
+bottom-hole pressure as independent of them.
 """
 
 from __future__ import annotations

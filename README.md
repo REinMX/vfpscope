@@ -1,12 +1,9 @@
 # VFPScope
 
-Interactive VFP table visualizer for Eclipse / OPM Flow decks.
+Interactive VFP check for a Petrel simulation case.
 
-Reads `VFPPROD` / `VFPINJ` tables from `.DATA` decks or bare include files,
-labels them by table number and by the wells/branches that consume them,
-and provides interactive exploration, automatic QC, coverage analysis and
-table comparison — for both well (tubing lift) tables and network branch
-(flowline) tables.
+Reads `VFPPROD` / `VFPINJ` from the Eclipse deck Petrel exported, shows which
+well or branch uses each table, and gates the run before you press Simulate.
 
 ## Quick start
 
@@ -14,9 +11,17 @@ table comparison — for both well (tubing lift) tables and network branch
 uv sync --extra test
 uv run vfpscope list deck.DATA
 uv run vfpscope qc deck.DATA --fail-on warning
-uv run vfpscope serve deck.DATA      # Streamlit GUI
+uv run vfpscope serve deck.DATA      # Petrel simulation GUI
 uv run vfpscope report deck.DATA -o report.html
 ```
+
+`serve` opens on Case: well → table, a run gate, and a CSV of the assignments.
+Lookup evaluates one development-strategy point. Outside the table, Eclipse
+extrapolates; the screen says so and does not treat the table-edge pressure
+as the simulator answer.
+
+The single-file edition below is the restricted parser/QC copy. It does not
+include this Petrel workspace.
 
 ## Single-file edition
 

@@ -1,7 +1,7 @@
 [project]
 name = "vfpscope"
 version = "0.1.0"
-description = "Interactive VFP table visualizer for Eclipse/OPM Flow decks (VFPPROD / VFPINJ)"
+description = "Petrel/Eclipse VFP check before a simulation run (VFPPROD / VFPINJ)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

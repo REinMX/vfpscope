@@ -106,7 +106,7 @@ def serve(
     host: str = typer.Option("localhost", "--host"),
     port: int = typer.Option(8501, "--port"),
 ):
-    """Launch the Streamlit GUI on the given deck."""
+    """Launch the Streamlit GUI on a Petrel Eclipse export."""
     import subprocess
     import sys
 

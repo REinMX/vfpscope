@@ -68,14 +68,13 @@ uv run vfpscope serve MODEL.DATA
 
 The main views are:
 
-- **Curves:** BHP vs FLO by THP, or any other axis pivot.
-- **Heatmap:** tabulated pressure over any two non-degenerate axes.
-- **QC:** structural, physical, consistency and coverage findings.
-- **Compare:** overlay two tables; mismatched unit systems or axis types are
-  rejected rather than silently converted.
-- **Coverage:** overlay run operating points from `.UNSMRY` and quantify
-  clamped timesteps by axis.
-- **Network:** display `BRANPROP`/`NODEPROP` topology.
+- **Case:** unit system, well → VFP table from `WCONPROD` / `WCONINJE`, unassigned tables, CSV of the assignments, and a run gate (run / review / do not run).
+- **Lookup:** type the rate, tubing-head pressure, water cut, GOR and lift the development strategy will use. Inside the table, the number is multilinear interpolation. Outside, Eclipse linearly extrapolates; the screen shows the edge-segment continuation and the table-edge value, and says it is not an Eclipse run.
+- **Curves:** bottom-hole pressure versus rate, or any other axis, with Petrel names (liquid rate, water cut, gas-lift rate) rather than FLO/WFR/ALQ.
+- **QC:** findings plus what each one means for the Petrel run (convergence, missing table, unit mismatch, datum).
+- **More:** heatmap, compare two exports, `.UNSMRY` coverage, network branches.
+
+Axis labels follow the table: oil rate, liquid rate, water cut, GOR, gas-lift rate, pump rating, and so on, with the table's units. A length-1 axis is called out as unused. Eclipse ignores it.
 
 For a remote Linux host, bind explicitly only on a trusted private network:
 
@@ -148,7 +147,9 @@ VFPScope maps table axis types to well summary vectors such as `WTHP`, `WOPR`,
 
 The output reports:
 
-- Fraction of timesteps clamped low or high on each axis.
+- Fraction of timesteps outside each table axis. Eclipse linearly extrapolates
+  there and can warn through `EXTRAPMS`. The fraction is the coverage problem.
+  The table-edge pressure is not the Eclipse answer.
 - Run maximum divided by table maximum.
 - Operating points lying on an unstable branch.
 
